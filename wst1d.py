@@ -60,22 +60,37 @@ class WST1D(object):
         Wavelet filters.
     phi : numpy array
         Low-pass filters.
+    xi : numpy array
+        Central frequencies.
+    sigma : numpy array
+        Wavelet bandwidth
     """
 
     def __init__(self,M,J,Jphi=None):
-        self.M = M
-        self.J = J
         if Jphi!=None:
             if Jphi<J:
-                raise TypeError('Jphi = {}, while J = {}.\nJphi must be greater than J.'.format(Jphi,self.J))
+                raise TypeError('Jphi = {}, while J = {}.\nJphi must be greater than J.'.format(Jphi,J))
         if Jphi==None:
             Jphi = J
+        if M/(3/2*2**(J-1))<2.:
+            dj = 1
+            while M/(3/2*2**(J-1-dj))<2.:
+                dj += 1
+            print('Oopsy ! To much Wavelet scales, J and Jphi have been changed.')
+            print(' '*10+'   J : {} --> {}'.format(J,J-dj))
+            print(' '*10+'Jphi : {} --> {}'.format(Jphi,Jphi-dj))
+            J -= dj
+            Jphi -= dj
+        self.M = M
+        self.J = J
         self.Jphi = Jphi
         self.n = self.M//2**self.Jphi
         # create filter bank :
-        filters = Filters1D(M,J,Jphi).generate_filters()
+        filters = Filters1D(self.M,self.J,self.Jphi).generate_filters()
         self.psi = filters['psi']
         self.phi = filters['phi']
+        self.xi = filters['xi']
+        self.sigma = filters['sigma']
 
     def get_coefs(self):
         """
@@ -146,10 +161,12 @@ class WST1D(object):
 
         Returns
         -------
-        numpy.ndarray
+        li : numpy.ndarray
             Array containing the physical scales.
         """
-        return ls*2**np.arange(1,self.J+1)
+        ki = self.xi/ls # Wavelet Wavenumber
+        li = 2*np.pi/ki # Wavelet Wavelength
+        return li
 
     def average(self,x):
         """
@@ -392,115 +409,109 @@ class WST1D(object):
 #------------------------------------------
 # Filter Bank Class
 #------------------------------------------
+def morlet_1d(M, xi, sigma, offset=0):
+    """
+        (from kymatio package) 
+        Computes a 1D Morlet filter.
+        A Morlet filter is the sum of a Gabor filter and a low-pass filter
+        to ensure that the sum has exactly zero mean in the temporal domain.
+        It is defined by the following formula in space:
+        psi(u) = g_{sigma}(u) (e^(i xi^T u) - beta)
+        where g_{sigma} is a Gaussian envelope, xi is a frequency and beta is
+        the cancelling parameter.
+        Parameters
+        ----------
+        sigma : float
+            bandwidth parameter
+        xi : float
+            central frequency (in [0, 1])
+        offset : int, optional
+            offset by which the signal starts
+        fft_shift : boolean
+            if true, shift the signal in a numpy style
+        Returns
+        -------
+        morlet_fft : ndarray
+            numpy array of size (M)
+    """
+    wv = gabor_1d(M, xi, sigma, offset)
+    wv_modulus = gabor_1d(M, 0, sigma, offset)
+    K = np.sum(wv) / np.sum(wv_modulus)
+    mor = wv - K * wv_modulus
+    return mor
+
+def gabor_1d(M, xi, sigma, offset=0):
+    """
+        (from kymatio package)
+        Computes a 1D Gabor filter.
+        A Gabor filter is defined by the following formula in space:
+        psi(u) = g_{sigma}(u) e^(i xi^T u)
+        where g_{sigma} is a Gaussian envelope and xi is a frequency.
+        Parameters
+        ----------
+        sigma : float
+            bandwidth parameter
+        xi : float
+            central frequency (in [0, 1])
+        offset : int, optional
+            offset by which the signal starts
+        fft_shift : boolean
+            if true, shift the signal in a numpy style
+        Returns
+        -------
+        morlet_fft : ndarray
+            numpy array of size (M, N)
+    """
+    curv = 1 / ( 2 * sigma**2)
+    gab = np.zeros(M, np.complex128)
+    xx = np.empty((2, M))
+    
+    for ii, ex in enumerate([-1, 0]):
+        xx[ii] = np.arange(offset + ex * M, offset + M + ex * M)
+    
+    arg = -curv * xx * xx + 1.j * (xx * xi)
+    gab = np.exp(arg).sum(0)
+    norm_factor = 2 * np.pi * sigma**2
+    gab = gab / norm_factor
+    return gab
+
+def normalize_filter(filter_ft):
+    filter_ft /= abs(ifft(filter_ft)).sum()
+    return filter_ft
+
+
 class Filters1D(object):
-    def __init__(self, M, J, Jphi):
+    def __init__(self,M,J,Jphi):
         self.M = M
         self.J = J
         self.Jphi = Jphi
+        self.xi = 3.*np.pi/4./2.**np.arange(J)
+        self.sigma = .8*2**np.arange(J) 
 
     def generate_filters(self, precision='double', normalized=True):
         if precision=='double':
             psi = np.zeros((self.J, self.M), dtype=np.float64)
         if precision=='single':
             psi = np.zeros((self.J, self.M), dtype=np.float32)
-        for j in range(1,self.J+1):
-                wavelet = self.morlet_1d(
-                    sigma=0.8 * 2**j, 
-                    xi=3.0 / 4.0 * np.pi /2**j
-                )
+        for j in range(0,self.J):
+                wavelet = morlet_1d(self.M, self.xi[j], self.sigma[j])
                 wavelet_ft = fft(wavelet)
                 wavelet_ft[0] = 0
+                if normalized==True:
+                    wavelet_ft = normalize_filter(wavelet_ft)
                 if precision=='double':
-                    psi[j-1] = wavelet_ft.real
+                    psi[j] = wavelet_ft.real
                 if precision=='single':
-                    psi[j-1] = wavelet_ft.real.astype(np.float32)
+                    psi[j] = wavelet_ft.real.astype(np.float32)
+        gab_ft = fft(gabor_1d(self.M, 0, 0.8 * 2**(self.Jphi)))
+        if normalized==True:
+            gab_ft = normalize_filter(gab_ft)
         if precision=='double':
-            phi = self.gabor_1d(0.8 * 2**(self.Jphi), 0, 0).real
+            phi = gab_ft.real
         if precision=='single':
-            phi = self.gabor_1d(0.8 * 2**(self.Jphi), 0, 0).real.astype(np.float32)
-        
-        if normalized == True:
-            psi_max = psi.max(1)
-            psi /= psi_max[:,None]
-            phi /= abs(phi).sum()
-            
-        filters = {'psi':psi, 'phi':fft(phi)}
-        
+            phi = gab_ft.real.astype(np.float32)
+        filters = {'psi':psi, 'phi':phi,'xi':self.xi,'sigma':self.sigma}
         return filters
-
-    def morlet_1d(self, sigma, xi, offset=0, fft_shift=False):
-        """
-            (from kymatio package) 
-            Computes a 1D Morlet filter.
-            A Morlet filter is the sum of a Gabor filter and a low-pass filter
-            to ensure that the sum has exactly zero mean in the temporal domain.
-            It is defined by the following formula in space:
-            psi(u) = g_{sigma}(u) (e^(i xi^T u) - beta)
-            where g_{sigma} is a Gaussian envelope, xi is a frequency and beta is
-            the cancelling parameter.
-            Parameters
-            ----------
-            sigma : float
-                bandwidth parameter
-            xi : float
-                central frequency (in [0, 1])
-            offset : int, optional
-                offset by which the signal starts
-            fft_shift : boolean
-                if true, shift the signal in a numpy style
-            Returns
-            -------
-            morlet_fft : ndarray
-                numpy array of size (M)
-        """
-        wv = self.gabor_1d(sigma, xi, offset, fft_shift)
-        wv_modulus = self.gabor_1d(sigma, 0, offset, fft_shift)
-        K = np.sum(wv) / np.sum(wv_modulus)
-        mor = wv - K * wv_modulus
-
-        return mor
-
-    def gabor_1d(self, sigma, xi, offset=0, fft_shift=False):
-        """
-            (from kymatio package)
-            Computes a 1D Gabor filter.
-            A Gabor filter is defined by the following formula in space:
-            psi(u) = g_{sigma}(u) e^(i xi^T u)
-            where g_{sigma} is a Gaussian envelope and xi is a frequency.
-            Parameters
-            ----------
-            sigma : float
-                bandwidth parameter
-            xi : float
-                central frequency (in [0, 1])
-            offset : int, optional
-                offset by which the signal starts
-            fft_shift : boolean
-                if true, shift the signal in a numpy style
-            Returns
-            -------
-            morlet_fft : ndarray
-                numpy array of size (M, N)
-        """
-        curv = 1 / ( 2 * sigma * sigma)
-
-        gab = np.zeros(self.M, np.complex128)
-        xx = np.empty((2, self.M))
-        
-        for ii, ex in enumerate([-1, 0]):
-            xx[ii] = np.arange(offset + ex * self.M, offset + self.M + ex * self.M)
-        
-        arg = -curv * xx * xx + 1.j * (xx * xi)
-        gab = np.exp(arg).sum(0)
-
-        norm_factor = 2 * np.pi * sigma * sigma
-        gab = gab / norm_factor
-
-        if fft_shift:
-            gab = np.fft.fftshift(gab, axes=0)
-
-        return gab
-
 
 #------------------------------------------
 # Older version
