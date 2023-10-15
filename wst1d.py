@@ -486,6 +486,7 @@ class Filters1D(object):
         self.J = J
         self.Jphi = Jphi
         self.xi = x0/2.**np.arange(J)
+        self.sigma0 = sigma0
         self.sigma = sigma0*2**np.arange(J) 
 
     def generate_filters(self, precision='double', normalized=True):
@@ -503,7 +504,7 @@ class Filters1D(object):
                     psi[j] = wavelet_ft.real
                 if precision=='single':
                     psi[j] = wavelet_ft.real.astype(np.float32)
-        gab_ft = fft(gabor_1d(self.M, 0, 0.8 * 2**(self.Jphi)))
+        gab_ft = fft(gabor_1d(self.M, 0, self.sigma0 * 2**(self.Jphi)))
         if normalized==True:
             gab_ft = normalize_filter(gab_ft)
         if precision=='double':
