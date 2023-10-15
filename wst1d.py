@@ -481,12 +481,12 @@ def normalize_filter(filter_ft):
 
 
 class Filters1D(object):
-    def __init__(self,M,J,Jphi):
+    def __init__(self,M,J,Jphi,x0=3.*np.pi/4.,sigma0=.8):
         self.M = M
         self.J = J
         self.Jphi = Jphi
-        self.xi = 3.*np.pi/4./2.**np.arange(J)
-        self.sigma = .8*2**np.arange(J) 
+        self.xi = x0/2.**np.arange(J)
+        self.sigma = sigma0*2**np.arange(J) 
 
     def generate_filters(self, precision='double', normalized=True):
         if precision=='double':
