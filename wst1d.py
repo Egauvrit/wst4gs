@@ -66,7 +66,7 @@ class WST1D(object):
         Wavelet bandwidth
     """
 
-    def __init__(self,M,J,Jphi=None):
+    def __init__(self,M,J,Jphi=None,x0=3*np.pi/4,sigma0=.8):
         if Jphi!=None:
             if Jphi<J:
                 raise TypeError('Jphi = {}, while J = {}.\nJphi must be greater than J.'.format(Jphi,J))
@@ -84,9 +84,11 @@ class WST1D(object):
         self.M = M
         self.J = J
         self.Jphi = Jphi
+        self.x0 = x0
+        self.sigma0 = sigma0
         self.n = self.M//2**self.Jphi
         # create filter bank :
-        filters = Filters1D(self.M,self.J,self.Jphi).generate_filters()
+        filters = Filters1D(self.M,self.J,self.Jphi,self.x0,self.sigma0).generate_filters()
         self.psi = filters['psi']
         self.phi = filters['phi']
         self.xi = filters['xi']
