@@ -72,9 +72,9 @@ class WST1D(object):
                 raise TypeError('Jphi = {}, while J = {}.\nJphi must be greater than J.'.format(Jphi,J))
         if Jphi==None:
             Jphi = J
-        if M/(3/2*2**(J-1))<2.:
+        if M/(2**(J-1))<2.:
             dj = 1
-            while M/(3/2*2**(J-1-dj))<2.:
+            while M/(2**(J-1-dj))<2.:
                 dj += 1
             print('Oopsy ! To much Wavelet scales, J and Jphi have been changed.')
             print(' '*10+'   J : {} --> {}'.format(J,J-dj))
